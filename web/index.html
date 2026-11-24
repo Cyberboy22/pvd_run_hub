@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PVD Run Hub – vom Anlagenlog zur Trainingsdatenbank</title>
+<meta name="description" content="Demo: PVD-Prozessdaten einlesen, bereinigen, in Phasen zerlegen, in einer SQL-Datenbank mit Labormesswerten verknüpfen, Drift überwachen und Härte mit einem Gauß-Prozess vorhersagen. Alle Daten simuliert.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/barlow-condensed-latin-600-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/barlow-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<a class="skip" href="#inhalt">Zum Inhalt springen</a>
+
+<header class="topbar">
+  <a class="wordmark" href="#top" aria-label="PVD Run Hub, zum Seitenanfang">
+    <svg viewBox="0 0 32 32" aria-hidden="true" class="wordmark-mark">
+      <circle cx="16" cy="16" r="14.5" fill="#d9dee4"/>
+      <circle cx="16" cy="16" r="11" fill="#c29a1e"/>
+      <circle cx="16" cy="16" r="8" fill="#8a6a0c"/>
+      <circle cx="16" cy="16" r="5" fill="#7a4fd0"/>
+      <circle cx="16" cy="16" r="2.2" fill="#18212b"/>
+    </svg>
+    <span>PVD Run Hub</span>
+  </a>
+  <span class="sim-badge" title="Anlagen, Rezepte und Messwerte sind erfunden">Simulierte Daten</span>
+  <a class="toplink" href="https://github.com/Cyberboy22/pvd-run-hub" rel="noopener">Code auf GitHub</a>
+</header>
+
+<main id="top">
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-text">
+      <h1 id="hero-title">Vom Anlagenlog zur Trainings&shy;datenbank</h1>
+      <p class="lede">PVD Run Hub liest die Prozessprotokolle von drei Beschichtungsanlagen ein, bereinigt sie,
+        erkennt die Prozessphasen und verknüpft jede Charge mit ihren Labormesswerten. Darauf setzen ein
+        Drift-Monitor und ein erstes KI-Modell auf.</p>
+    </div>
+
+    <figure class="viewport" aria-describedby="hero-caption">
+      <div class="viewport-head">
+        <p id="hero-caption" class="viewport-caption">Charge <strong data-hero="run">…</strong>, gelesen aus der Datenbank</p>
+        <p class="viewport-clock" aria-hidden="true"><span data-hero="clock">0:00</span> h</p>
+      </div>
+      <div id="hero-chart" class="hero-chart" role="img" aria-label="Verlauf von Temperatur, Bias-Spannung, Kathodenleistung und Stickstofffluss einer Beschichtungscharge, unterteilt in die Phasen Heizen, Ätzen, Beschichten und Abkühlen."></div>
+      <button class="replay" type="button" data-hero="replay">Ablauf erneut abspielen</button>
+    </figure>
+
+    <p class="facts" data-facts>Die Demo lädt …</p>
+    <p class="honesty"><strong>Alle Daten sind simuliert.</strong> Anlagen, Rezepte und Messwerte sind erfunden, damit
+      die Pipeline etwas Realistisches zu verarbeiten hat. Der Code, die Datenbank und die Methoden sind echt.</p>
+  </section>
+
+  <div class="layout" id="inhalt">
+    <nav class="rail" aria-label="Ablauf der Pipeline">
+      <ol>
+        <li><a href="#rohdaten"><span class="step">1</span>Rohdaten</a></li>
+        <li><a href="#bereinigung"><span class="step">2</span>Bereinigung &amp; Phasen</a></li>
+        <li><a href="#datenbank"><span class="step">3</span>Datenbank</a></li>
+        <li><a href="#drift"><span class="step">4</span>Drift-Monitor</a></li>
+        <li><a href="#modell"><span class="step">5</span>Modell</a></li>
+      </ol>
+      <a class="rail-about" href="#ueber">Über das Projekt</a>
+    </nav>
+
+    <div class="sections">
+      <!-- 1 ---------------------------------------------------------------- -->
+      <section id="rohdaten" class="chapter" aria-labelledby="h-rohdaten">
+        <header class="chapter-head">
+          <h2 id="h-rohdaten"><span class="num">1</span>Drei Anlagen, drei Dateiformate</h2>
+          <p>Jede Anlage schreibt ihr Protokoll anders. Bevor man irgendetwas auswerten kann, müssen Einheiten,
+            Zeitstempel und fehlende Werte vereinheitlicht werden. So sehen die ersten Zeilen der Dateien aus:</p>
+        </header>
+
+        <div class="rawgrid" data-raw></div>
+
+        <h3 class="sub">Ein gemeinsames Schema</h3>
+        <p class="note">Nach dem Einlesen hat jede Charge dieselben Spalten in denselben Einheiten, egal von welcher Anlage sie kommt.</p>
+        <div class="tablewrap">
+          <table class="mapping">
+            <thead>
+              <tr><th scope="col">Signal</th><th scope="col">Einheit</th><th scope="col">MSIP-1</th><th scope="col">AIP-1</th><th scope="col">HS-1</th></tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Zeit</th><td>s seit Start</td><td>TT.MM.JJJJ hh:mm:ss</td><td>UTC, umgerechnet nach Europe/Berlin</td><td><code>t_rel[s]</code></td></tr>
+              <tr><th scope="row">Bias-Spannung</th><td>V</td><td><code>Bias [V]</code></td><td><code>bias_voltage_V</code></td><td><code>U_bias[V]</code></td></tr>
+              <tr><th scope="row">Kathodenleistung</th><td>kW</td><td><code>Leistung [kW]</code></td><td><code>arc_current_A</code> × <code>arc_voltage_V</code> / 1000</td><td><code>P_kat[W]</code> / 1000</td></tr>
+              <tr><th scope="row">Kathodenspannung</th><td>V</td><td><code>Kathodenspannung [V]</code></td><td><code>arc_voltage_V</code></td><td><code>U_kat[V]</code></td></tr>
+              <tr><th scope="row">Kammerdruck</th><td>Pa</td><td><code>Druck [mPa]</code> / 1000</td><td><code>chamber_pressure_Pa</code></td><td><code>p[mbar]</code> × 100</td></tr>
+              <tr><th scope="row">Ar- und N<sub>2</sub>-Fluss</th><td>sccm</td><td><code>Ar [sccm]</code>, <code>N2 [sccm]</code></td><td><code>Ar_flow_sccm</code>, <code>N2_flow_sccm</code></td><td><code>Q_Ar[sccm]</code>, <code>Q_N2[sccm]</code></td></tr>
+              <tr><th scope="row">Substrattemperatur</th><td>°C</td><td><code>Temperatur [°C]</code></td><td><code>substrate_temp_C</code></td><td><code>T[K]</code> − 273,15</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="stats" data-ingest-stats></p>
+      </section>
+
+      <!-- 2 ---------------------------------------------------------------- -->
+      <section id="bereinigung" class="chapter" aria-labelledby="h-bereinigung">
+        <header class="chapter-head">
+          <h2 id="h-bereinigung"><span class="num">2</span>Jede Charge, Phase für Phase</h2>
+          <p>Die Protokolle sagen nicht, welcher Prozessschritt gerade läuft. Die Pipeline erkennt Heizen, Ätzen,
+            Beschichten und Abkühlen aus den Signalen und prüft jede Charge auf Datenlücken, eingefrorene Sensoren,
+            Abweichungen vom Rezept und erhöhte Arc-Raten.</p>
+        </header>
+
+        <dl class="phase-key">
+          <div><dt><span class="swatch ph-heating"></span>Heizen</dt><dd>alles vor dem Ätzen: Abpumpen und Aufheizen</dd></div>
+          <div><dt><span class="swatch ph-etching"></span>Ätzen</dt><dd>hohe Bias-Spannung oder Argon, noch kein N<sub>2</sub></dd></div>
+          <div><dt><span class="swatch ph-coating"></span>Beschichten</dt><dd>N<sub>2</sub> fließt und die Kathoden laufen mit voller Leistung</dd></div>
+          <div><dt><span class="swatch ph-cooling"></span>Abkühlen</dt><dd>alles nach dem Beschichten</dd></div>
+        </dl>
+
+        <div class="explorer">
+          <div class="runlist-panel">
+            <div class="filters" role="group" aria-label="Chargen filtern">
+              <button type="button" class="chip" aria-pressed="true" data-filter="all">Alle</button>
+              <button type="button" class="chip" aria-pressed="false" data-filter="issues">Mit Befunden</button>
+              <button type="button" class="chip" aria-pressed="false" data-filter="MSIP-1">MSIP-1</button>
+              <button type="button" class="chip" aria-pressed="false" data-filter="AIP-1">AIP-1</button>
+              <button type="button" class="chip" aria-pressed="false" data-filter="HS-1">HS-1</button>
+            </div>
+            <div class="runlist" role="listbox" aria-label="Chargen" tabindex="0" data-runlist></div>
+          </div>
+
+          <div class="run-panel" aria-live="polite">
+            <div class="run-head" data-run-head></div>
+            <div class="lanes" data-lanes><p class="loading">Datenbank wird geladen …</p></div>
+            <div class="run-details">
+              <div>
+                <h3 class="sub small">Befunde</h3>
+                <ul class="flaglist" data-flags></ul>
+              </div>
+              <div>
+                <h3 class="sub small">Labormesswerte</h3>
+                <div data-lab></div>
+              </div>
+            </div>
+            <details class="rawdetails">
+              <summary>Rohdatei dieser Charge ansehen</summary>
+              <pre class="rawtext" data-raw-run></pre>
+            </details>
+            <details class="rawdetails">
+              <summary>SQL hinter dieser Ansicht</summary>
+              <pre class="rawtext sqltext" data-run-sql></pre>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 ---------------------------------------------------------------- -->
+      <section id="datenbank" class="chapter" aria-labelledby="h-datenbank">
+        <header class="chapter-head">
+          <h2 id="h-datenbank"><span class="num">3</span>Eine Datenbank statt verstreuter Dateien</h2>
+          <p>Logdatei, Chargenbuch, Rezeptliste und Laborblatt landen in einer relationalen Datenbank. Jede
+            Härtemessung lässt sich bis zur Rohdatei zurückverfolgen, mit Prüfsumme. Die Datenbank läuft hier direkt
+            im Browser (SQLite über WebAssembly), Sie können also eigene Abfragen schreiben.</p>
+        </header>
+
+        <figure class="er">
+          <div class="er-canvas" data-er role="img" aria-label="Datenbankschema: coating_run ist mit plant, target_set, recipe, run_phase, process_signal, quality_flag, run_features, drift_check und sample verbunden; sample mit measurement."></div>
+          <figcaption>Datenbankschema. Die Zahlen zeigen, wie viele Zeilen jede Tabelle in dieser Demo hat.</figcaption>
+        </figure>
+
+        <div class="console">
+          <div class="console-examples" role="group" aria-label="Beispielabfragen" data-examples></div>
+          <label class="visually-hidden" for="sql-input">SQL-Abfrage</label>
+          <textarea id="sql-input" class="sql-input" spellcheck="false" rows="9" data-sql></textarea>
+          <div class="console-bar">
+            <button type="button" class="btn" data-run-sql-btn>Abfrage ausführen</button>
+            <span class="hint">Strg + Enter. Änderungen gelten nur in diesem Browser-Tab.</span>
+            <span class="console-status" data-sql-status></span>
+          </div>
+          <div class="tablewrap result" data-sql-result></div>
+        </div>
+      </section>
+
+      <!-- 4 ---------------------------------------------------------------- -->
+      <section id="drift" class="chapter" aria-labelledby="h-drift">
+        <header class="chapter-head">
+          <h2 id="h-drift"><span class="num">4</span>Drift-Monitor mit Golden Run</h2>
+          <p>Alle paar Wochen läuft ein Referenzrezept. Die erste Referenzcharge auf einem neuen Target ist der
+            Golden Run, jede spätere wird mit ihm verglichen. So wird Targetverschleiß sichtbar, bevor er die
+            Schichten verschlechtert.</p>
+        </header>
+
+        <div class="alert" data-drift-alert></div>
+
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Anlage">
+            <button type="button" class="chip" aria-pressed="true" data-plant="MSIP-1">MSIP-1</button>
+            <button type="button" class="chip" aria-pressed="false" data-plant="AIP-1">AIP-1</button>
+          </div>
+          <div class="seg" role="group" aria-label="Kenngröße">
+            <button type="button" class="chip" aria-pressed="true" data-metric="cathode_v">Kathodenspannung</button>
+            <button type="button" class="chip" aria-pressed="false" data-metric="rate_um_per_h">Beschichtungsrate</button>
+            <button type="button" class="chip" aria-pressed="false" data-metric="hardness_gpa">Härte</button>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="chart" data-drift-chart></div>
+          <div class="legend" data-drift-legend></div>
+          <details class="tabledetails">
+            <summary>Als Tabelle anzeigen</summary>
+            <div class="tablewrap" data-drift-table></div>
+          </details>
+        </div>
+      </section>
+
+      <!-- 5 ---------------------------------------------------------------- -->
+      <section id="modell" class="chapter" aria-labelledby="h-modell">
+        <header class="chapter-head">
+          <h2 id="h-modell"><span class="num">5</span>Ein erstes Modell und der nächste Versuch</h2>
+          <p>Auf der Trainingstabelle lernt ein Gauß-Prozess die Härte der CrAlN-Schichten aus den gemessenen
+            Prozesswerten. Zu jeder Prognose gibt er eine Unsicherheit an. Damit lässt sich ausrechnen, welcher
+            Versuch als Nächstes am meisten verspricht.</p>
+        </header>
+
+        <div class="model-grid">
+          <div class="panel">
+            <h3 class="sub small">Wie gut ist das Modell?</h3>
+            <p class="note">Jede Charge wird einmal weggelassen und vorhergesagt (Leave-one-out). Punkte nahe der Diagonalen sind gute Vorhersagen.</p>
+            <div class="chart square" data-parity></div>
+            <div class="compare" data-compare></div>
+          </div>
+          <div class="panel">
+            <h3 class="sub small">Prozesslandkarte</h3>
+            <p class="note">Vorhergesagte Härte über Bias-Spannung und N<sub>2</sub>-Anteil. Die übrigen Größen stellen Sie mit den Reglern ein. Ein Klick auf die Karte setzt den Punkt.</p>
+            <div class="mapwrap">
+              <div class="chart" data-map></div>
+              <div class="readout" data-readout aria-live="polite"></div>
+            </div>
+            <div class="sliders" data-sliders></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h3 class="sub small">Vorschläge für die nächsten drei Chargen</h3>
+          <p class="note" data-suggest-note></p>
+          <div class="tablewrap" data-suggest></div>
+        </div>
+
+        <div class="model-foot">
+          <div class="panel">
+            <h3 class="sub small">Was das Modell für wichtig hält</h3>
+            <p class="note">Kehrwert der gelernten Längenskala je Eingangsgröße (ARD-Kernel). Längerer Balken: kleine Änderungen dieser Größe verändern die Härte stärker.</p>
+            <div data-relevance></div>
+          </div>
+          <div class="panel prose">
+            <h3 class="sub small">Warum ein Gauß-Prozess?</h3>
+            <p>Beschichtungsstudien haben Dutzende Chargen, nicht Tausende. Gauß-Prozesse kommen mit wenigen Daten
+              aus und liefern eine ehrliche Unsicherheit. Genau die braucht man, um zwischen „da, wo es gut aussieht“
+              und „da, wo wir noch nichts wissen“ abzuwägen. Die Spalte „Erw. Verbesserung“ ist das Expected
+              Improvement: wie viel GPa ein Versuch im Mittel über die beste bisherige Charge hinaus bringt.</p>
+            <p>Die Vorschläge lassen sich direkt an mein Projekt
+              <a href="https://github.com/Cyberboy22/Agentic-active-learning" rel="noopener">Agentic Active Learning</a>
+              übergeben: Die Datei <code>integrations/pvd_coating_objective.py</code> macht die CrAlN-Studie dort zu
+              einem Optimierungsziel.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- about ------------------------------------------------------------ -->
+      <section id="ueber" class="chapter about" aria-labelledby="h-ueber">
+        <header class="chapter-head">
+          <h2 id="h-ueber">Über das Projekt</h2>
+        </header>
+        <div class="about-grid">
+          <div class="prose">
+            <p>PVD Run Hub ist ein Portfolio-Projekt zu datengetriebener PVD-Prozessentwicklung. Es zeigt die Schritte,
+              die vor jedem KI-Modell kommen: Daten erfassen, bereinigen, strukturiert speichern und mit den
+              Schichteigenschaften verknüpfen.</p>
+            <h3 class="sub small">Was echt ist und was nicht</h3>
+            <ul>
+              <li>Echt: die Pipeline (Parser, Bereinigung, Phasenerkennung, Qualitätsprüfung), das Datenbankschema,
+                der Drift-Monitor, das Modell und die Tests.</li>
+              <li>Simuliert: alle Anlagen, Logdateien, Rezepte und Messwerte. Die Zusammenhänge im Simulator sind
+                plausibel gewählt, aber kein validiertes physikalisches Modell.</li>
+              <li>Die nächste Stufe wären echte Anlagenexporte. Dafür muss nur ein Parser je Format ergänzt werden.</li>
+            </ul>
+          </div>
+          <div class="prose">
+            <h3 class="sub small">Technik</h3>
+            <ul>
+              <li>Python, pandas, NumPy, scikit-learn, SciPy</li>
+              <li>SQLite (Schema 1:1 auf PostgreSQL übertragbar)</li>
+              <li>Diese Seite: HTML, CSS und JavaScript ohne Framework, Diagramme als SVG, SQLite im Browser über sql.js</li>
+              <li>13 automatische Tests prüfen die Pipeline gegen die absichtlich eingebauten Datenfehler und das Browser-Modell gegen Python</li>
+            </ul>
+            <h3 class="sub small">Autor</h3>
+            <p>Arif Onur Alp, Informatik (B.Sc.) an der RWTH Aachen.
+              <a href="https://github.com/Cyberboy22" rel="noopener">github.com/Cyberboy22</a></p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <p>PVD Run Hub, Demo 0.1. Alle Daten sind simuliert.</p>
+</footer>
+
+<div class="tooltip" role="tooltip" hidden data-tooltip></div>
+<script src="vendor/sql-wasm.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,3 @@
+sql.js 1.17.0 (MIT) - vendor/sql-wasm.js, vendor/sql-wasm.wasm - https://github.com/sql-js/sql.js (licence: vendor/sql.js-LICENSE)
+Barlow, Barlow Condensed (SIL Open Font License 1.1) - https://github.com/jpt/barlow
+IBM Plex Mono (SIL Open Font License 1.1) - https://github.com/IBM/plex
